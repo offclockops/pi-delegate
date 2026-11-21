@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,4 +62,40 @@ test("the variant's MCP server and monitor commands point at files that exist", 
     assert.ok(match, `no plugin path in: ${monitor.command}`);
     assert.ok(existsSync(inVariant(match[1])), match[1]);
   }
+});
+
+// The checks above only prove that the files exist. This one starts the server the way the
+// variant's .mcp.json does, through the symlinked directory, because a main-module guard
+// that is false on that path makes the process exit 0 without a byte and every other test
+// here stays green.
+test("the variant's MCP server answers initialize when started through the variant directory", async () => {
+  const { mcpServers } = readJson(join(VARIANT, ".mcp.json"));
+  const [server] = Object.values(mcpServers);
+  const args = server.args.map(inVariant);
+  const { code, stdout, stderr } = await new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (chunk) => { out += chunk; });
+    child.stderr.on("data", (chunk) => { err += chunk; });
+    child.on("error", reject);
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`server did not exit within 15s; stdout so far: ${out}`));
+    }, 15_000);
+    child.on("close", (exitCode) => {
+      clearTimeout(timer);
+      resolvePromise({ code: exitCode, stdout: out, stderr: err });
+    });
+    child.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+    })}\n`);
+    child.stdin.end();
+  });
+  assert.notEqual(stdout.trim(), "", `the server wrote nothing (exit ${code}); stderr: ${stderr}`);
+  const reply = stdout.trim().split("\n").map((line) => JSON.parse(line)).find((message) => message.id === 1);
+  assert.ok(reply, stdout);
+  const core = readJson(join(VARIANT, ".claude-plugin", "plugin.json"));
+  assert.equal(reply.result.serverInfo.version, core.version);
 });

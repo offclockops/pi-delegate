@@ -1,4 +1,4 @@
-import { existsSync, appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -568,7 +568,23 @@ export async function main() {
 //
 // pathToFileURL does the platform-correct conversion (drive letter, separators, and
 // percent-escaping of characters that are legal in a path but not in a URL).
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// The script path is also compared after resolving symlinks. Node resolves them for
+// import.meta.url of the main module but leaves argv[1] as it was typed, so a server
+// started through a symlinked directory (variants/core/src is one) compared unequal: the
+// same silent exit 0 as above, by another road.
+function isMainModule() {
+  const script = process.argv[1];
+  if (!script) return false;
+  if (import.meta.url === pathToFileURL(script).href) return true;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(script)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   // Before anything else: whatever kills this process from here on gets a line in
   // events.log, which the monitor prints. The server's stderr goes to the plugin host, not
   // to the session, so without this a crash reaches the user as nothing but tools quietly
