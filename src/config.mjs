@@ -69,6 +69,15 @@ export const DEFAULTS = Object.freeze({
   // false on a metered connection or an air-gapped machine, and the report then falls back
   // to whatever snapshot is already on disk.
   arena_refresh: true,
+  // Flags that keep the user's whole pi environment out of one dispatch. Both default to
+  // true. `extensions` lists extension files to load explicitly (--extension); they still
+  // load while discovery stays off.
+  no_skills: true,
+  no_extensions: true,
+  extensions: Object.freeze([]),
+  // Names of parent environment variables the child may inherit on top of the fixed base
+  // allowlist (see src/child-env.mjs). Empty by default.
+  env_passthrough: Object.freeze([]),
 });
 
 export function configPath() {
@@ -101,6 +110,10 @@ function nonEmptyString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+function stringList(value, fallback) {
+  return Array.isArray(value) ? value.map(nonEmptyString).filter((p) => p !== null) : [...fallback];
+}
+
 // `key in raw` rather than `raw[key] ?? default`: null is a meaningful value here ("do not
 // emit this flag"), and ?? would conflate it with "not written at all".
 function optionalString(raw, key, fallback) {
@@ -128,6 +141,10 @@ export function loadConfig(file = configPath()) {
       ? raw.drafter_patterns.map(nonEmptyString).filter((p) => p !== null)
       : [...DEFAULTS.drafter_patterns],
     arena_refresh: typeof raw.arena_refresh === "boolean" ? raw.arena_refresh : DEFAULTS.arena_refresh,
+    no_skills: typeof raw.no_skills === "boolean" ? raw.no_skills : DEFAULTS.no_skills,
+    no_extensions: typeof raw.no_extensions === "boolean" ? raw.no_extensions : DEFAULTS.no_extensions,
+    extensions: stringList(raw.extensions, DEFAULTS.extensions),
+    env_passthrough: stringList(raw.env_passthrough, DEFAULTS.env_passthrough),
   };
 }
 
@@ -148,6 +165,10 @@ export function saveConfig(patch, file = configPath()) {
     drafter_patterns: Array.isArray(merged.drafter_patterns)
       ? merged.drafter_patterns.map(nonEmptyString).filter((p) => p !== null)
       : [...DEFAULTS.drafter_patterns],
+    no_skills: typeof merged.no_skills === "boolean" ? merged.no_skills : DEFAULTS.no_skills,
+    no_extensions: typeof merged.no_extensions === "boolean" ? merged.no_extensions : DEFAULTS.no_extensions,
+    extensions: stringList(merged.extensions, DEFAULTS.extensions),
+    env_passthrough: stringList(merged.env_passthrough, DEFAULTS.env_passthrough),
   };
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(normalized, null, 2)}\n`);

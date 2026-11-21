@@ -55,7 +55,9 @@ export const TOOL_DEFINITIONS = [
   {
     name: "pi_dispatch",
     description:
-      "Dispatch a task book to the local pi agent. Defaults to mode=async: returns a session_id immediately and " +
+      "Dispatch a task to the local pi agent. Give it either `task_file` (the absolute path of a task book, " +
+      "which pi reads) or `prompt` (the task text itself, sent to pi word for word) — exactly one of the two. " +
+      "Defaults to mode=async: returns a session_id immediately and " +
       "notifies you on completion, so give pi a whole coherent unit of work the way you would a subagent. " +
       "mode=sync blocks until completion and returns a ~15 line verdict. " +
       "Leave provider / model unset to use the user's own pi configuration (the default model in " +
@@ -64,7 +66,14 @@ export const TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       properties: {
-        task_file: { type: "string", description: "Absolute path to the task book" },
+        task_file: {
+          type: "string",
+          description: "Absolute path to the task book. Give this or prompt, not both.",
+        },
+        prompt: {
+          type: "string",
+          description: "The task as text, sent to pi word for word. Give this or task_file, not both.",
+        },
         cwd: { type: "string", description: "Working directory for pi (usually the project root)" },
         model: {
           type: "string",
@@ -127,7 +136,7 @@ export const TOOL_DEFINITIONS = [
             "needs only the new message. Omit it for a new conversation.",
         },
       },
-      required: ["task_file", "cwd"],
+      required: ["cwd"],
     },
   },
   {
@@ -293,10 +302,21 @@ export function createToolHandlers({
 
   return {
     async pi_dispatch({
-      task_file, cwd, model, provider, mode = "async", timeout_s,
+      task_file, prompt, cwd, model, provider, mode = "async", timeout_s,
       thinking, tools, no_context_files, append_system_prompt, resume_session_id,
     }) {
-      if (!existsSync(task_file)) return text(`Task book does not exist: ${task_file}`, true);
+      const hasTaskFile = task_file !== undefined && task_file !== null;
+      const hasPrompt = prompt !== undefined && prompt !== null;
+      if (hasTaskFile && hasPrompt) {
+        return text("Give either task_file or prompt, not both.", true);
+      }
+      if (!hasTaskFile && !hasPrompt) {
+        return text("Give one of task_file (path of a task book) or prompt (the task text).", true);
+      }
+      if (hasPrompt && (typeof prompt !== "string" || prompt.trim() === "")) {
+        return text("prompt must be a non-empty string.", true);
+      }
+      if (hasTaskFile && !existsSync(task_file)) return text(`Task book does not exist: ${task_file}`, true);
       // Three-layer resolution: call arguments -> config.json -> pi's own defaults (no
       // flag emitted). When neither layer supplies one, effectiveModel is null, meaning
       // "let pi decide" — a normal state, not an error. The co-pilot guard only has
@@ -354,7 +374,7 @@ export function createToolHandlers({
       const enroll = registry.has(sessionId) ? registry.update : registry.add;
       enroll(sessionId, {
         handle: null, done: null, verdict: null,
-        cwd, taskFile: task_file, model: effectiveModel, provider: effectiveProvider,
+        cwd, taskFile: hasTaskFile ? task_file : null, model: effectiveModel, provider: effectiveProvider,
         timeoutS: timeout_s ?? config.timeout_s,
         // Stamped here rather than when the child spawns, so the status line's elapsed
         // time covers the reservation window too. A dispatch that is slow to start is
@@ -366,7 +386,8 @@ export function createToolHandlers({
       let done;
       try {
         ({ handle, done } = await dispatchFn({
-          taskFile: task_file, cwd,
+          ...(hasTaskFile ? { taskFile: task_file } : { prompt }),
+          cwd,
           model, provider,
           thinking, tools,
           noContextFiles: no_context_files,
@@ -455,7 +476,17 @@ export function createToolHandlers({
       return withSession(session_id, (entry) => {
         const notReady = requireHandle(entry, session_id);
         if (notReady) return notReady;
-        entry.handle?.steer(message);
+        // A run that has a verdict, or whose child has ended, cannot take a message. Say so
+        // instead of answering "Sent" for a message nobody will read.
+        if (entry.verdict) {
+          return text(`Cannot steer ${session_id}: the run has already ended (status: ${entry.verdict.status}).`, true);
+        }
+        if (entry.handle.state?.().running === false) {
+          return text(`Cannot steer ${session_id}: the pi child process has already ended.`, true);
+        }
+        if (entry.handle.steer(message) === false) {
+          return text(`Could not send the message to ${session_id}: the pi child process is not accepting input.`, true);
+        }
         return text(`Sent: ${message}`);
       });
     },

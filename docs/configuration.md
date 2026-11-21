@@ -30,9 +30,46 @@ To override one of the measured defaults for a single dispatch, specify it direc
 `pi_dispatch` call (`thinking`, `tools`, `no_context_files`, `append_system_prompt`, `provider`,
 `model`, `timeout_s`).
 
-`--mode rpc`, `--session-id`, `--no-skills`, and `--no-extensions` are structural and not
-overridable; `--no-session` is **deliberately never passed** (omitting it is what makes the
-session land on disk, which is what gives `pi_transcript` something to read).
+`--mode rpc` and `--session-id` are structural and not overridable; `--no-session` is
+**deliberately never passed** (omitting it is what makes the session land on disk, which is what
+gives `pi_transcript` something to read).
+
+## Skills, extensions and the child environment
+
+These keys go in the same `config.json`. They apply to every dispatch.
+
+| Key | Default | Effect |
+|---|---|---|
+| `no_skills` | `true` | Passes `--no-skills`, so pi does not load the user's skills into a dispatch. Set `false` to let pi discover them. |
+| `no_extensions` | `true` | Passes `--no-extensions`, so pi does not discover extensions. Set `false` to let pi discover them. |
+| `extensions` | `[]` | Paths of extension files. Each one becomes `--extension <path>`, in order. They load even while `no_extensions` is `true`. |
+| `env_passthrough` | `[]` | Names of environment variables the child may inherit. See below. |
+
+```json
+{
+  "extensions": ["/opt/ext/guard.ts"],
+  "env_passthrough": ["SOME_PROVIDER_KEY"]
+}
+```
+
+The pi child process does **not** inherit the whole environment of the host process. It gets a
+fixed base set: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LANGUAGE`, every `LC_*`,
+`TERM`, `COLORTERM`, `TMPDIR`, `TZ`, the `XDG_*` base-directory names, and on Windows the usual
+system names (`Path`, `PATHEXT`, `SystemRoot`, `USERPROFILE`, `APPDATA`, `TEMP`, and so on).
+Anything else stays out, including session tokens of the host. If pi reads a provider key from
+the environment, list its name in `env_passthrough`, or the child will not see it.
+
+## Task as a file or as text
+
+`pi_dispatch` takes exactly one of `task_file` (the absolute path of a task book; pi is told to
+read it) or `prompt` (the task text; it is sent to pi word for word). Giving both, giving
+neither, or giving a blank `prompt` is an error and nothing is dispatched.
+
+## Steering
+
+`pi_steer` returns an error, and sends nothing, when the run has already ended (the message names
+the final status), when the pi child process has exited, or when the message could not be written.
+It answers `Sent: <message>` only when the message reached a live child.
 
 ## Modes, and what counts as existing product code
 
