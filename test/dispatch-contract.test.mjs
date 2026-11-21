@@ -120,6 +120,14 @@ test("pi_dispatch refuses both a prompt and a task file, neither, and a blank pr
   assert.equal(seen.length, 0, "dispatch must not run for a refused call");
 });
 
+test("the handler passes an inline prompt on unchanged, surrounding space included", async () => {
+  const seen = [];
+  const handlers = setup(recordingDispatch(seen));
+  const prompt = "  keep  every  space \n";
+  await handlers.pi_dispatch({ prompt, cwd: tmpDir(), mode: "sync" });
+  assert.equal(seen[0].prompt, prompt);
+});
+
 test("dispatch sends an inline prompt to the child word for word", async () => {
   const prompt = "List the exported names of src/a.mjs; answer in one line.";
   const { done } = await dispatch({
@@ -169,6 +177,22 @@ test("each configured extension becomes an --extension flag, in order, beside --
   const given = args.flatMap((arg, index) => (arg === "--extension" ? [args[index + 1]] : []));
   assert.deepEqual(given, extensions);
   assert.ok(args.includes("--no-extensions"), "explicit paths load while discovery stays off");
+});
+
+test("a config object without the new keys keeps the default argument list", () => {
+  // A config in the shape it had before these keys existed.
+  const { no_skills, no_extensions, extensions, env_passthrough, ...legacy } = CONFIG;
+  const args = buildPiArgs({ sessionId: "s", config: legacy, piDefaults: NO_PI_DEFAULTS });
+  assert.ok(args.includes("--no-skills"));
+  assert.ok(args.includes("--no-extensions"));
+  assert.ok(!args.includes("--extension"));
+});
+
+test("configured extensions still load when extension discovery is on", () => {
+  const config = { ...CONFIG, no_extensions: false, extensions: ["/opt/ext/guard.ts"] };
+  const args = buildPiArgs({ sessionId: "s", config, piDefaults: NO_PI_DEFAULTS });
+  assert.equal(args[args.indexOf("--extension") + 1], "/opt/ext/guard.ts");
+  assert.ok(!args.includes("--no-extensions"));
 });
 
 test("loadConfig reads the new keys, and falls back to the defaults for bad values", () => {
