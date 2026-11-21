@@ -16,12 +16,15 @@ const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 const inVariant = (value) => value.replaceAll("${CLAUDE_PLUGIN_ROOT}", VARIANT);
 
 test("the core variant holds the MCP server and the monitor, and nothing else", () => {
-  assert.deepEqual(readdirSync(VARIANT).sort(), [".claude-plugin", ".mcp.json", "bin", "monitors", "src"]);
+  // package.json is here for its "type": "module". An installed copy of the variant has no
+  // parent package, and without that field the extensionless scripts in bin/ would depend
+  // on Node guessing their module format.
+  assert.deepEqual(readdirSync(VARIANT).sort(), [".claude-plugin", ".mcp.json", "bin", "monitors", "package.json", "src"]);
   assert.deepEqual(readdirSync(join(VARIANT, ".claude-plugin")), ["plugin.json"]);
 });
 
 test("the core variant shares its code through relative links that stay inside the repository", () => {
-  for (const name of [".mcp.json", "bin", "monitors", "src"]) {
+  for (const name of [".mcp.json", "bin", "monitors", "package.json", "src"]) {
     const link = join(VARIANT, name);
     assert.ok(lstatSync(link).isSymbolicLink(), `${name} should be a symlink`);
     assert.equal(readlinkSync(link), `../../${name}`);
