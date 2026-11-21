@@ -29,7 +29,11 @@ export function buildChildEnv(parentEnv, passthrough = []) {
     if (isBaseName(name) && parentEnv[name] !== undefined) env[name] = parentEnv[name];
   }
   for (const name of passthrough) {
-    if (typeof name === "string" && name !== "" && parentEnv[name] !== undefined) env[name] = parentEnv[name];
+    // Own variables only: a name such as "constructor" must not pick up an inherited
+    // property of the environment object.
+    if (typeof name === "string" && name !== "" && Object.hasOwn(parentEnv, name) && parentEnv[name] !== undefined) {
+      env[name] = parentEnv[name];
+    }
   }
   return env;
 }

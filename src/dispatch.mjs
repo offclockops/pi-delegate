@@ -117,6 +117,11 @@ export async function dispatch({
   piCommand = resolvePiCommand({ configured: config.pi_command }),
   gitDiffStat = "",
 }) {
+  const hasTaskFile = taskFile !== undefined && taskFile !== null;
+  const hasPrompt = typeof prompt === "string" && prompt.trim() !== "";
+  if (hasTaskFile === hasPrompt) {
+    throw new Error("dispatch needs exactly one of taskFile and a non-empty prompt");
+  }
   const effectiveTimeoutS = timeoutS ?? config.timeout_s;
   const [command, ...prefixArgs] = piCommand;
   // A piCommand path (e.g. "node test/fixtures/fake-pi.mjs" in tests) is written
@@ -326,6 +331,10 @@ export async function dispatch({
   const handle = {
     sessionId,
     steer(message) {
+      // `settled` covers the grace window after an abort, a timeout or a terminal event:
+      // the child is still alive there, but it is being closed out and will not act on a
+      // message.
+      if (settled) return false;
       return send({ type: "steer", message });
     },
     async abort() {

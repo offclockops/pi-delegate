@@ -42,7 +42,7 @@ These keys go in the same `config.json`. They apply to every dispatch.
 |---|---|---|
 | `no_skills` | `true` | Passes `--no-skills`, so pi does not load the user's skills into a dispatch. Set `false` to let pi discover them. |
 | `no_extensions` | `true` | Passes `--no-extensions`, so pi does not discover extensions. Set `false` to let pi discover them. |
-| `extensions` | `[]` | Paths of extension files. Each one becomes `--extension <path>`, in order. They load even while `no_extensions` is `true`. |
+| `extensions` | `[]` | Paths of extension files. Each one becomes `--extension <path>`, in order. They load even while `no_extensions` is `true`. Use absolute paths: pi resolves a relative one against the working directory of the dispatch. |
 | `env_passthrough` | `[]` | Names of environment variables the child may inherit. See below. |
 
 ```json
@@ -69,7 +69,8 @@ neither, or giving a blank `prompt` is an error and nothing is dispatched.
 
 `pi_steer` returns an error, and sends nothing, when the run has already ended (the message names
 the final status), when the pi child process has exited, or when the message could not be written.
-It answers `Sent: <message>` only when the message reached a live child.
+It also returns an error while a run is being closed out after an abort or a timeout. It answers
+`Sent: <message>` only when the message was written to a child that was still running.
 
 ## Modes, and what counts as existing product code
 

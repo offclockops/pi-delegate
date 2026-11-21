@@ -301,6 +301,27 @@ test("handle.steer reports true while the child runs and false after it has ende
   assert.equal(ended.handle.steer("go left"), false);
 });
 
+test("handle.steer reports false while an aborted run is being closed out", async () => {
+  // --ignore-sigterm keeps the child alive through the grace period, which is the window
+  // where a steer used to be written to a child that was already being killed.
+  const { handle, done } = await dispatch({
+    prompt: "Work.", cwd: tmpDir(), config: CONFIG, piDefaults: NO_PI_DEFAULTS, timeoutS: 30,
+    sessionId: "st3", piCommand: [...FAKE_PI, "--ignore-sigterm"], gitDiffStat: "",
+  });
+  await handle.abort();
+  assert.equal(handle.state().running, true, "the child is still alive in the grace period");
+  assert.equal(handle.steer("go left"), false);
+  assert.equal((await done).status, "aborted");
+});
+
+test("dispatch refuses a call with no task and a call with two", async () => {
+  const { dir, file } = tmpTask();
+  const base = { cwd: dir, config: CONFIG, piDefaults: NO_PI_DEFAULTS, timeoutS: 5, sessionId: "x1", piCommand: FAKE_PI, gitDiffStat: "" };
+  await assert.rejects(dispatch({ ...base }), /exactly one/);
+  await assert.rejects(dispatch({ ...base, taskFile: file, prompt: "Also this." }), /exactly one/);
+  await assert.rejects(dispatch({ ...base, prompt: "  " }), /exactly one/);
+});
+
 // --- 4. Allowlisted child environment ---
 
 test("buildChildEnv keeps the base variables and drops everything else", () => {
@@ -327,6 +348,14 @@ test("buildChildEnv adds the passthrough names that exist, and only those", () =
   assert.equal(env.OPENAI_API_KEY, "k2");
   assert.ok(!("NOT_SET" in env));
   assert.ok(!("MY_SECRET" in env));
+});
+
+test("buildChildEnv passes through own variables only, not inherited property names", () => {
+  const env = buildChildEnv(process.env, ["constructor", "toString", "__proto__", "hasOwnProperty"]);
+  for (const name of ["constructor", "toString", "hasOwnProperty"]) {
+    assert.ok(!Object.hasOwn(env, name), `${name} must not become a variable`);
+  }
+  assert.equal(Object.getPrototypeOf(env), Object.prototype);
 });
 
 test("the default configuration passes nothing through", () => {
