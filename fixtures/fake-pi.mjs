@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // A minimal stand-in for `pi --mode rpc`. Only implements the behavior the tests need.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const has = (flag) => args.includes(flag);
@@ -37,6 +37,14 @@ const assistantMessage = (text, { input = 10, output = 5 } = {}) => ({
 });
 
 emit({ type: "session", version: 3, id: "fake", cwd: process.cwd() });
+
+// --dump-env=<path>: write this process's environment to that file as JSON, at startup
+// and whatever mode follows. It lets a test see from the outside exactly which variables
+// dispatch() handed to the child, instead of trusting what dispatch() meant to pass.
+const dumpEnv = valueOf("--dump-env=");
+if (dumpEnv) {
+  writeFileSync(dumpEnv, JSON.stringify(process.env));
+}
 
 // --sigterm-log=<path>: append one line to that file every time a SIGTERM is received.
 // Works independently of --ignore-sigterm/--stay-alive, letting a test observe from the
@@ -146,6 +154,25 @@ if (has("--model-error")) {
     emit({ type: "message_end", message: assistantMessage("done") });
     emit({ type: "agent_end", messages: [assistantMessage("done")] });
     setInterval(() => {}, 1000);
+  } else if (has("--echo-prompt")) {
+    // Answers the initial prompt with its own text, then ends. It lets a test read, in
+    // the verdict's last message, the exact message dispatch() sent as the prompt.
+    let buffer = "";
+    process.stdin.on("data", (chunk) => {
+      buffer += chunk;
+      let index;
+      while ((index = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (!line) continue;
+        const command = JSON.parse(line);
+        if (command.type === "prompt") {
+          emit({ type: "message_end", message: assistantMessage(`Received: ${command.message}`) });
+          emit({ type: "agent_end" });
+          process.exit(0);
+        }
+      }
+    });
   } else if (has("--echo-steer")) {
     let buffer = "";
     process.stdin.on("data", (chunk) => {
