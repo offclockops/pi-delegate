@@ -53,6 +53,25 @@ installed one for that session, so you can test changes without uninstalling.
 
 </details>
 
+### The core variant: tools and monitor only
+
+`pi-delegate-core` is a second plugin in this repository's marketplace. It ships the MCP tools and
+the completion monitor, and none of the skills or hooks. Use it when another setup already supplies
+the instructions and the discipline, and you want only the dispatch tools. Add the marketplace from
+the repository that carries the variant, then install it instead of the full plugin:
+
+```
+/plugin install pi-delegate-core@pi-delegate
+```
+
+Install one of the two, not both: they register the same MCP server. The variant has no
+`/pi-delegate:setup`; configure it through `~/.claude/pi-delegate/config.json`
+([docs/configuration.md](docs/configuration.md)).
+
+The variant shares its code with the full plugin through relative symlinks in `variants/core/`. An
+install from a Git-hosted marketplace copies the link targets into the plugin cache. A checkout on a
+file system without symlink support does not carry the variant.
+
 Then run `/pi-delegate:setup`: it finds `pi` and works out which provider and model a dispatch will
 actually reach, explains the discipline modes and asks which one you want, and fixes what it can. It
 then offers a verification dispatch and the status line indicator, and closes with what to do next.
@@ -200,6 +219,7 @@ something rather than documents to read.
 ```bash
 npm test                    # node --test, no external dependencies
 claude plugin validate .
+claude plugin validate variants/core
 ```
 
 `fixtures/fake-pi.mjs` stands in for `pi --mode rpc`. It deliberately lives **outside**

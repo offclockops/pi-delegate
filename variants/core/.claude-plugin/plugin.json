@@ -1,0 +1,9 @@
+{
+  "name": "pi-delegate-core",
+  "version": "0.14.0",
+  "description": "The pi-delegate MCP server and completion monitor only: no skills and no hooks",
+  "license": "MIT",
+  "author": {
+    "name": "stanley"
+  }
+}
