@@ -59,7 +59,7 @@ test("every tunable pi_dispatch flag is an optional parameter whose description 
   for (const key of ["model", "provider", "thinking", "tools", "no_context_files", "append_system_prompt", "timeout_s"]) {
     assert.ok(props[key], `missing parameter ${key}`);
   }
-  assert.deepEqual(dispatchTool.inputSchema.required, ["task_file", "cwd"]);
+  assert.deepEqual(dispatchTool.inputSchema.required, ["cwd"]);
   // The caller has to know the defaults were measured to override them deliberately
   assert.match(props.tools.description, /bash/);
   assert.match(props.thinking.description, /off/);
@@ -356,11 +356,11 @@ test("pi_steer sends the message into handle.steer", async () => {
   const dispatchFn = async ({ sessionId }) => ({
     handle: {
       sessionId,
-      steer(msg) { steerCalls.push(msg); },
+      steer(msg) { steerCalls.push(msg); return true; },
       async abort() {},
       state: () => ({ running: true }),
     },
-    done: Promise.resolve({ ...okVerdict, session_id: sessionId }),
+    done: new Promise(() => {}),
   });
   const { handlers } = setup(dispatchFn);
   const sessionId = await dispatchAndGetSessionId(handlers, task);

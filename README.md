@@ -73,6 +73,12 @@ that apply.
 | `tools` | `read,write,edit` | Granting `bash` made the model roam endlessly with `ls` / `cat` instead of writing anything. |
 | `no_context_files` | `true` | Measured: without it, 43 reads / 0 writes / timed out; with it, finished in 93 seconds. |
 
+The pi child process does **not** inherit the whole environment of the host process. It gets a
+fixed base set (`PATH`, `HOME`, locale and terminal names, the temp directory, and on Windows the
+system names). If pi reads a provider key from the environment, list its name in
+`env_passthrough` in `config.json`, or the child will not see it. `no_skills`, `no_extensions`
+and `extensions` in the same file control the skills and extensions flags.
+
 Pinning a provider and model, the resolution order between call arguments, the config file and pi's
 own defaults, and which flags are structural rather than yours to override:
 [docs/configuration.md](docs/configuration.md).
@@ -94,9 +100,9 @@ counts as existing product code, where the per-project state lives, and where th
 
 | Tool | Purpose |
 |---|---|
-| `pi_dispatch` | Dispatch a task book. `mode=sync` waits for the result, `mode=async` runs it in the background |
+| `pi_dispatch` | Dispatch a task book (`task_file`) or an inline `prompt`. `mode=sync` waits for the result, `mode=async` runs it in the background |
 | `pi_status` | Check progress; also reports when no notification watcher is attached |
-| `pi_steer` | Interject mid-run when it's heading the wrong way |
+| `pi_steer` | Interject mid-run when it's heading the wrong way; an error if the run has ended |
 | `pi_abort` | Abort a run in flight |
 | `pi_result` | Collect the verdict of an async dispatch |
 | `pi_transcript` | Drill in only when the verdict isn't enough |

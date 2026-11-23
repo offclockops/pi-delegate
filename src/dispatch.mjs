@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { createJsonlSplitter } from "./jsonl.mjs";
 import { computeVerdict, isTerminalEvent } from "./verdict.mjs";
+import { buildChildEnv } from "./child-env.mjs";
 import { loadConfig, loadPiDefaults, resolveModelSelection, THINKING_LEVELS } from "./config.mjs";
 
 export { DEFAULT_TIMEOUT_S } from "./config.mjs";
@@ -19,9 +20,13 @@ const KILL_GRACE_MS = 2000;
 //
 // **Structural** (fixed, not overridable): `--mode rpc` (this plugin exists on top of the
 // rpc bidirectional channel for steer/abort), `--session-id` (the verdict has to line up
-// with a session), `--no-skills` and `--no-extensions` (do not pour the user's entire pi
-// environment into a single dispatch), plus `--no-session` which is DELIBERATELY NOT
-// passed (omitting it is what makes the session land on disk so drill-down can read it).
+// with a session), plus `--no-session` which is DELIBERATELY NOT passed (omitting it is
+// what makes the session land on disk so drill-down can read it).
+//
+// `--no-skills` and `--no-extensions` (do not pour the user's entire pi environment into a
+// single dispatch) are on by default but come from configuration: `no_skills` and
+// `no_extensions` switch them off, and `extensions` adds an explicit `--extension <path>`
+// per entry (explicit paths still load while discovery is off).
 // Note: pi has no --cwd; the working directory comes from spawn's options.cwd.
 //
 // **Measured defaults** (overridable; the rationale is repeated in the tool descriptions
@@ -73,16 +78,20 @@ export function buildPiArgs({
   if (resolvedTools !== null) args.push("--tools", resolvedTools);
   args.push("--session-id", sessionId);
   if (resolvedNoContextFiles) args.push("--no-context-files");
-  args.push("--no-skills", "--no-extensions");
+  // `!== false`, not truthiness: a config object built without these keys must keep the
+  // default argument list, not silently drop both flags.
+  if (config.no_skills !== false) args.push("--no-skills");
+  if (config.no_extensions !== false) args.push("--no-extensions");
+  for (const extension of config.extensions ?? []) args.push("--extension", extension);
   if (resolvedAppend !== null && resolvedAppend !== undefined) {
     args.push("--append-system-prompt", resolvedAppend);
   }
   return args;
 }
 
-function extractRequestedFiles(taskFile) {
+function extractRequestedFiles({ taskFile, prompt }) {
   try {
-    const body = readFileSync(taskFile, "utf8");
+    const body = taskFile ? readFileSync(taskFile, "utf8") : (prompt ?? "");
     return [...body.matchAll(/[\w./-]+\.(?:ts|tsx|js|jsx|mjs|svelte|py|json|css)\b/g)].map((m) => m[0]);
   } catch {
     return [];
@@ -91,6 +100,7 @@ function extractRequestedFiles(taskFile) {
 
 export async function dispatch({
   taskFile,
+  prompt,
   cwd,
   config = loadConfig(),
   piDefaults = loadPiDefaults(),
@@ -107,6 +117,11 @@ export async function dispatch({
   piCommand = resolvePiCommand({ configured: config.pi_command }),
   gitDiffStat = "",
 }) {
+  const hasTaskFile = taskFile !== undefined && taskFile !== null;
+  const hasPrompt = typeof prompt === "string" && prompt.trim() !== "";
+  if (hasTaskFile === hasPrompt) {
+    throw new Error("dispatch needs exactly one of taskFile and a non-empty prompt");
+  }
   const effectiveTimeoutS = timeoutS ?? config.timeout_s;
   const [command, ...prefixArgs] = piCommand;
   // A piCommand path (e.g. "node test/fixtures/fake-pi.mjs" in tests) is written
@@ -124,7 +139,12 @@ export async function dispatch({
     ...resolvedPrefixArgs,
     ...buildPiArgs({ sessionId, config, piDefaults, provider, model, thinking, tools, noContextFiles, appendSystemPrompt }),
   ];
-  const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    // Not the whole parent environment: see src/child-env.mjs.
+    env: buildChildEnv(process.env, config.env_passthrough),
+  });
 
   const events = [];
   const startedAt = Date.now();
@@ -196,7 +216,7 @@ export async function dispatch({
       failure,
       stderr,
       exitCode,
-      requestedFiles: extractRequestedFiles(taskFile),
+      requestedFiles: extractRequestedFiles({ taskFile, prompt }),
       cwd,
       taskFile,
       gitDiffStat: resolveGitDiffStat(),
@@ -269,8 +289,11 @@ export async function dispatch({
     killWithEscalation();
   }, effectiveTimeoutS * 1000);
 
+  // Returns true only when the command was written to a child that has not ended.
   function send(command_) {
-    if (child.stdin.writable) child.stdin.write(`${JSON.stringify(command_)}\n`);
+    if (terminated || !child.stdin.writable) return false;
+    child.stdin.write(`${JSON.stringify(command_)}\n`);
+    return true;
   }
 
   // The child process can die (a race) after we check `writable` but before the actual
@@ -281,7 +304,8 @@ export async function dispatch({
     // events drive the verdict path.
   });
 
-  send({ type: "prompt", message: `Read ${taskFile} and follow it.` });
+  // An inline prompt goes to the child word for word; a task file goes by reference.
+  send({ type: "prompt", message: taskFile ? `Read ${taskFile} and follow it.` : prompt });
 
   child.on("close", (exitCode) => {
     clearTimeout(timer);
@@ -307,7 +331,11 @@ export async function dispatch({
   const handle = {
     sessionId,
     steer(message) {
-      send({ type: "steer", message });
+      // `settled` covers the grace window after an abort, a timeout or a terminal event:
+      // the child is still alive there, but it is being closed out and will not act on a
+      // message.
+      if (settled) return false;
+      return send({ type: "steer", message });
     },
     async abort() {
       aborted = true;
