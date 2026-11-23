@@ -44,7 +44,7 @@ fill it, and length reads as confidence whether or not any is warranted. A short
 easier to disagree with, which is the point.
 
 pi's reply comes back as the verdict's `last_message`. If it says it was truncated, get the
-rest with `pi_transcript session_id=<id> filter=text` — that reply is budgeted too.
+rest with `pi_result session_id=<id> full=true`.
 
 ## Following up
 

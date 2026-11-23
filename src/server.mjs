@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { dispatch as realDispatch } from "./dispatch.mjs";
 import { createRegistry } from "./registry.mjs";
 import { serve } from "./stdio-server.mjs";
-import { formatVerdict, assistantText, writtenPaths, progressSummary, collapseRepeats } from "./verdict.mjs";
+import { LAST_MESSAGE_LIMIT, formatVerdict, assistantText, writtenPaths, progressSummary, collapseRepeats } from "./verdict.mjs";
 import { loadConfig, loadPiDefaults, isDrafterModel } from "./config.mjs";
 import { formatToolCalls, formatLastN, capped } from "./transcript.mjs";
 import { findCompletion, formatRecovered, unknownSessionMessage } from "./recover.mjs";
@@ -176,14 +176,25 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "pi_abort",
-    description: "Abort a dispatch immediately. Note that aborted and failed call for opposite responses: re-dispatch an aborted task unchanged, but rewrite the task book after a failure.",
+    description: "Abort a dispatch immediately. For a task book dispatch, aborted and failed call for opposite responses: re-dispatch an aborted task unchanged, but rewrite the task book after a failure.",
     inputSchema: { type: "object", properties: { session_id: { type: "string" } }, required: ["session_id"] },
   },
   {
     name: "pi_result",
     description: "Retrieve the verdict (~15 lines) of a finished dispatch. This is how an async dispatch is collected. " +
       "A sync dispatch's session_id stays collectable too, so re-read a verdict here rather than re-dispatching to see it again.",
-    inputSchema: { type: "object", properties: { session_id: { type: "string" } }, required: ["session_id"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        session_id: { type: "string" },
+        full: {
+          type: "boolean",
+          description: `Return the whole final message instead of its first ${LAST_MESSAGE_LIMIT} characters. ` +
+            "Use it when the verdict says the message was truncated.",
+        },
+      },
+      required: ["session_id"],
+    },
   },
   {
     name: "pi_transcript",
@@ -496,20 +507,21 @@ export function createToolHandlers({
         const notReady = requireHandle(entry, session_id);
         if (notReady) return notReady;
         entry.handle?.abort();
+        if (!entry.taskFile) return text(`Aborted ${session_id}.`);
         return text(`Aborted ${session_id}. Remember: re-dispatch an aborted task unchanged; do not rewrite the task book.`);
       });
     },
 
-    async pi_result({ session_id }) {
+    async pi_result({ session_id, full = false }) {
       // There is exactly one error message for an unknown session: the one registry.get
       // throws. An earlier version rewrote it here too ("valid:" vs the registry's
       // "currently valid:"), and the two strings had already drifted apart once —
       // a duplicated implementation like that will drift again sooner or later.
       if (!registry.has(session_id)) return recoverOrExplain(session_id);
       const entry = registry.get(session_id);
-      if (entry.verdict) return text(formatVerdict(entry.verdict));
+      if (entry.verdict) return text(formatVerdict(entry.verdict, { full }));
       try {
-        return text(formatVerdict(await entry.done));
+        return text(formatVerdict(await entry.done, { full }));
       } catch (error) {
         return text(formatVerdict(failedVerdict(session_id, error)));
       }
