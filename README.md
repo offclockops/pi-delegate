@@ -123,7 +123,7 @@ counts as existing product code, where the per-project state lives, and where th
 | `pi_status` | Check progress; also reports when no notification watcher is attached |
 | `pi_steer` | Interject mid-run when it's heading the wrong way; an error if the run has ended |
 | `pi_abort` | Abort a run in flight |
-| `pi_result` | Collect the verdict of an async dispatch |
+| `pi_result` | Collect the verdict of an async dispatch; `full=true` returns the whole final message |
 | `pi_transcript` | Drill in only when the verdict isn't enough |
 | `pi_stats` | Check token usage |
 

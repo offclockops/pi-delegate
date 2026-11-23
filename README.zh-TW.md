@@ -86,7 +86,7 @@ ollama, LM Studio, 或像 omlx 這類本地 OpenAI 相容的伺服器，處理�
 | `pi_status` | 檢查進度；若沒掛載 notification watcher 也會回報 |
 | `pi_steer` | 當執行方向不對時，中途插話導正 |
 | `pi_abort` | 中止執行中的作業 |
-| `pi_result` | 收集非同步 dispatch 的判定 |
+| `pi_result` | 收集非同步 dispatch 的判定；`full=true` 回傳完整的最後訊息 |
 | `pi_transcript` | 只有在判定不夠用時才深入查看 |
 | `pi_stats` | 檢查 token 使用量 |
 

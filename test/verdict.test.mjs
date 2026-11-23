@@ -153,6 +153,25 @@ test("a final assistant message over the limit is truncated and flagged", () => 
   const v = computeVerdict({ ...BASE, events });
   assert.equal(v.last_message.length, LAST_MESSAGE_LIMIT);
   assert.equal(v.last_message_truncated, true);
+  assert.equal(v.last_message_full, long);
+});
+
+// A read-only scout writes nothing, so its answer exists only as the final message, and
+// pi_transcript is budgeted too. The truncation hint has to name the one way to get it all.
+test("a truncated verdict names pi_result full=true, and full prints the whole message", () => {
+  const long = "x".repeat(LAST_MESSAGE_LIMIT + 50) + "END";
+  const events = [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: long }] } },
+    settled,
+  ];
+  const v = computeVerdict({ ...BASE, events });
+  const short = formatVerdict(v);
+  assert.match(short, /full=true/);
+  assert.match(short, new RegExp(`${long.length} chars`));
+  assert.ok(!short.includes("END"));
+  const full = formatVerdict(v, { full: true });
+  assert.ok(full.includes(long));
+  assert.doesNotMatch(full, /truncated/);
 });
 
 test("a final message within the limit is not truncated", () => {

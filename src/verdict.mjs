@@ -392,6 +392,9 @@ export function computeVerdict({
     session_id: sessionId,
     last_message: truncated ? raw.slice(0, LAST_MESSAGE_LIMIT) : raw,
     last_message_truncated: truncated,
+    // Kept whole for pi_result full=true: a read-only dispatch writes nothing, so this
+    // message is its entire output, and pi_transcript is budgeted as well.
+    last_message_full: raw,
     exit_code: exitCode,
     failure: resolvedFailure,
     stderr,
@@ -430,7 +433,7 @@ export function capFileList(paths, cap = FILE_LIST_CAP) {
   return `${paths.slice(0, cap).join(", ")}, … and ${rest} more (${paths.length} total)`;
 }
 
-export function formatVerdict(v) {
+export function formatVerdict(v, { full = false } = {}) {
   const list = (arr) => (arr.length ? capFileList(arr) : "(none)");
   const lines = [
     `status:                 ${v.status}`,
@@ -444,9 +447,12 @@ export function formatVerdict(v) {
   ];
   if (v.failure) lines.push(`failure:                ${v.failure}`);
   if (v.stderr) lines.push("stderr:", ...stderrTail(v.stderr));
-  lines.push(
-    `last_message:${v.last_message_truncated ? " (truncated; use pi_transcript for the full text)" : ""}`,
-    v.last_message || "(empty)",
-  );
+  const whole = full && typeof v.last_message_full === "string";
+  const message = whole ? v.last_message_full : v.last_message;
+  const total = v.last_message_full?.length;
+  const note = !whole && v.last_message_truncated
+    ? ` (truncated${total ? ` at ${v.last_message.length} of ${total} chars` : ""}; pi_result full=true returns all of it)`
+    : "";
+  lines.push(`last_message:${note}`, message || "(empty)");
   return lines.join("\n");
 }

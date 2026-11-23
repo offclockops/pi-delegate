@@ -400,6 +400,38 @@ test("pi_abort calls handle.abort", async () => {
   assert.match(result.content[0].text, /Aborted /);
 });
 
+test("pi_abort of a task book dispatch keeps the re-dispatch reminder", async () => {
+  const task = tmpFile("TASK.md");
+  writeFileSync(task, "Modify a.ts");
+  const { handlers } = setup(fakeDispatch());
+  const sessionId = await dispatchAndGetSessionId(handlers, task);
+  const result = await handlers.pi_abort({ session_id: sessionId });
+  assert.match(result.content[0].text, /re-dispatch an aborted task unchanged/);
+});
+
+// A prompt dispatch has no task book, and its caller may abort to give up on it.
+test("pi_abort of a prompt dispatch gives no re-dispatch advice", async () => {
+  const { handlers } = setup(fakeDispatch());
+  const started = await handlers.pi_dispatch({ prompt: "List the files.", cwd: "/tmp", mode: "async" });
+  const sessionId = started.content[0].text.match(/session_id:\s*(\S+)/)[1];
+  const result = await handlers.pi_abort({ session_id: sessionId });
+  assert.match(result.content[0].text, /Aborted /);
+  assert.doesNotMatch(result.content[0].text, /re-dispatch|task book/);
+});
+
+test("pi_result full=true returns the whole final message", async () => {
+  const long = "y".repeat(5000) + "END";
+  const verdict = { ...okVerdict, last_message: long.slice(0, 1000), last_message_truncated: true, last_message_full: long };
+  const { handlers } = setup(fakeDispatch(verdict));
+  const started = await handlers.pi_dispatch({ prompt: "Map the repo.", cwd: "/tmp", mode: "async" });
+  const sessionId = started.content[0].text.match(/session_id:\s*(\S+)/)[1];
+  await new Promise((r) => setTimeout(r, 50));
+  const short = await handlers.pi_result({ session_id: sessionId });
+  assert.ok(!short.content[0].text.includes("END"));
+  const full = await handlers.pi_result({ session_id: sessionId, full: true });
+  assert.ok(full.content[0].text.includes(long));
+});
+
 test("pi_abort returns an error for an unknown session_id", async () => {
   const task = tmpFile("TASK.md");
   writeFileSync(task, "Modify a.ts");
