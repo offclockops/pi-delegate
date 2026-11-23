@@ -10,6 +10,11 @@
       "name": "pi-delegate",
       "source": "./",
       "description": "Dispatch implementation and test writing to a local pi agent over a held-open RPC session, with steer/abort mid-run and a per-project discipline mode."
+    },
+    {
+      "name": "pi-delegate-core",
+      "source": "./variants/core",
+      "description": "Only the MCP tools and the completion monitor, for setups that bring their own skills and hooks."
     }
   ]
 }
