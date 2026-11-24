@@ -191,8 +191,8 @@ If they decline, say it can be added any time with `/pi-delegate:statusline`, an
 Tell the user setup is done, and summarize where things stand: the mode they picked, and
 what a dispatch will resolve to. Then point at:
 
-- The seven MCP tools this plugin adds: `pi_dispatch`, `pi_status`, `pi_steer`, `pi_abort`,
-  `pi_result`, `pi_transcript`, `pi_stats` — see `skills/delegating-to-pi/SKILL.md` (loaded
+- The eight MCP tools this plugin adds: `pi_dispatch`, `pi_status`, `pi_steer`, `pi_abort`,
+  `pi_result`, `pi_transcript`, `pi_stats`, and `pi_intercom` (off until configured) — see `skills/delegating-to-pi/SKILL.md` (loaded
   automatically when relevant) for how and when to use each one.
 - `/pi-delegate:mode <mode>` — change the discipline mode later, any time.
 - `/pi-delegate:probe` — get a one-time bypass in `strict` mode to make a single hand-edit

@@ -66,12 +66,37 @@ test("every tunable pi_dispatch flag is an optional parameter whose description 
   assert.match(props.no_context_files.description, /\d+/);
 });
 
-test("TOOL_DEFINITIONS defines all seven tools", () => {
+test("TOOL_DEFINITIONS defines all eight tools", () => {
   const names = TOOL_DEFINITIONS.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    "pi_abort", "pi_dispatch", "pi_result", "pi_stats",
+    "pi_abort", "pi_dispatch", "pi_intercom", "pi_result", "pi_stats",
     "pi_status", "pi_steer", "pi_transcript",
   ]);
+});
+
+test("pi_intercom says it is not configured when no intercom peer is wired", async () => {
+  const handlers = createToolHandlers({ intercom: null });
+  const result = await handlers.pi_intercom({ action: "list" });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /not configured/);
+});
+
+test("pi_intercom routes list and send to the peer and marks failures as errors", async () => {
+  const calls = [];
+  const intercom = {
+    enabled: true,
+    list: async () => ({ ok: true, self: "claude-x", sessions: [] }),
+    send: async (args) => { calls.push(args); return { ok: false, code: "E_REPLY_TARGET" }; },
+  };
+  const handlers = createToolHandlers({ intercom });
+  const listed = await handlers.pi_intercom({ action: "list" });
+  assert.equal(listed.isError, undefined);
+  assert.match(listed.content[0].text, /claude-x/);
+  const sent = await handlers.pi_intercom({ action: "send", to: "pi-1", text: "hi", replyTo: "m1", expect_reply_s: 0 });
+  assert.equal(sent.isError, true);
+  assert.deepEqual(calls[0], { to: "pi-1", text: "hi", replyTo: "m1", expect_reply_s: 0 });
+  const bad = await handlers.pi_intercom({ action: "nope" });
+  assert.equal(bad.isError, true);
 });
 
 test("every tool has a non-empty description and an inputSchema", () => {

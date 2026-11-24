@@ -59,6 +59,35 @@ system names (`Path`, `PATHEXT`, `SystemRoot`, `USERPROFILE`, `APPDATA`, `TEMP`,
 Anything else stays out, including session tokens of the host. If pi reads a provider key from
 the environment, list its name in `env_passthrough`, or the child will not see it.
 
+## Coordinating independent pi sessions
+
+`pi_intercom` makes this Claude session a peer on [pi-intercom](https://github.com/nicobailon/pi-intercom)'s
+local broker, the one your pi windows already use. It is off until the config names the pi package
+set and the pi agent directory:
+
+```json
+{
+  "intercom": {
+    "modules": "/path/to/pi/npm/node_modules",
+    "agent_dir": "/path/to/pi/agent",
+    "name": "claude-coord",
+    "ack_timeout_s": 60
+  }
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `modules` | — | A `node_modules` that holds `pi-intercom` and `tsx`. The plugin loads pi-intercom's own client from it, so it speaks the same protocol as the installed release. |
+| `agent_dir` | — | The pi agent directory (`PI_CODING_AGENT_DIR`); it picks the broker. |
+| `name` | `claude-` + 8 characters of a per-session key | The name this session registers under; the default survives `/reload-plugins`. Put it in each handoff. |
+| `ack_timeout_s` | `60` | After a `send`, a notification arrives if the target sends nothing back in this time. A send can override it with `expect_reply_s`; `0` turns it off. |
+
+The MCP server holds the connection for the whole Claude session and reconnects if the broker goes
+away. Every inbound message reaches the session through the same notification channel as a finished
+dispatch, so it needs the monitor, which runs in interactive sessions only. Whether an idle pi window
+wakes on a message is pi-intercom's `inboundTrigger` setting on the pi side.
+
 ## Task as a file or as text
 
 `pi_dispatch` takes exactly one of `task_file` (the absolute path of a task book; pi is told to

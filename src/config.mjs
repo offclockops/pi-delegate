@@ -78,6 +78,7 @@ export const DEFAULTS = Object.freeze({
   // Names of parent environment variables the child may inherit on top of the fixed base
   // allowlist (see src/child-env.mjs). Empty by default.
   env_passthrough: Object.freeze([]),
+  intercom: null,
 });
 
 export function configPath() {
@@ -122,6 +123,22 @@ function optionalString(raw, key, fallback) {
   return nonEmptyString(raw[key]) ?? fallback;
 }
 
+// The optional pi-intercom peer (src/intercom.mjs). Both paths are required; anything else
+// turns the feature off rather than half-configuring it.
+function intercomSettings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const modules = nonEmptyString(value.modules);
+  const agentDir = nonEmptyString(value.agent_dir);
+  if (!modules || !agentDir) return null;
+  const ack = value.ack_timeout_s === null || value.ack_timeout_s === undefined ? NaN : Number(value.ack_timeout_s);
+  return {
+    modules,
+    agent_dir: agentDir,
+    name: nonEmptyString(value.name),
+    ack_timeout_s: Number.isInteger(ack) && ack >= 0 ? ack : 60,
+  };
+}
+
 export function loadConfig(file = configPath()) {
   const raw = loadJsonObject(file);
   const timeout = Number(raw.timeout_s);
@@ -145,6 +162,7 @@ export function loadConfig(file = configPath()) {
     no_extensions: typeof raw.no_extensions === "boolean" ? raw.no_extensions : DEFAULTS.no_extensions,
     extensions: stringList(raw.extensions, DEFAULTS.extensions),
     env_passthrough: stringList(raw.env_passthrough, DEFAULTS.env_passthrough),
+    intercom: intercomSettings(raw.intercom),
   };
 }
 
@@ -152,6 +170,9 @@ export function loadConfig(file = configPath()) {
 // current (or default) value. Returns what was written so callers need not re-read.
 export function saveConfig(patch, file = configPath()) {
   const merged = { ...loadConfig(file), ...patch };
+  // A hand-written intercom block that does not validate stays as written, so a setup or
+  // mode change never erases the user's paths; only a patch that names it replaces it.
+  const rawIntercom = "intercom" in (patch ?? {}) ? patch.intercom : loadJsonObject(file).intercom;
   const normalized = {
     provider: nonEmptyString(merged.provider),
     model: nonEmptyString(merged.model),
@@ -169,6 +190,7 @@ export function saveConfig(patch, file = configPath()) {
     no_extensions: typeof merged.no_extensions === "boolean" ? merged.no_extensions : DEFAULTS.no_extensions,
     extensions: stringList(merged.extensions, DEFAULTS.extensions),
     env_passthrough: stringList(merged.env_passthrough, DEFAULTS.env_passthrough),
+    ...(rawIntercom === undefined ? {} : { intercom: intercomSettings(rawIntercom) ?? rawIntercom }),
   };
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(normalized, null, 2)}\n`);
