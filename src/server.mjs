@@ -12,6 +12,7 @@ import { loadConfig, loadPiDefaults, isDrafterModel } from "./config.mjs";
 import { formatToolCalls, formatLastN, capped } from "./transcript.mjs";
 import { findCompletion, formatRecovered, unknownSessionMessage } from "./recover.mjs";
 import { createNotifier } from "./notifier.mjs";
+import { createIntercom } from "./intercom.mjs";
 import { eventsSocketPath } from "./events-log.mjs";
 import { writeStatus, clearStatus } from "./status.mjs";
 import { installFatalLog, recordFatal } from "./fatal-log.mjs";
@@ -219,6 +220,26 @@ export const TOOL_DEFINITIONS = [
     description: "Token usage and elapsed time for a dispatch. Only needed when debugging or estimating cost.",
     inputSchema: { type: "object", properties: { session_id: { type: "string" } }, required: ["session_id"] },
   },
+  {
+    name: "pi_intercom",
+    description:
+      "Coordinate independent pi sessions through pi-intercom's local broker. `list` returns your own " +
+      "session name (put it in each handoff) and the roster with each session's status. `send` delivers " +
+      "a message; an idle pi session wakes on it. Every inbound message arrives as a notification. " +
+      "After a send, a notification also arrives if the target says nothing within the reply deadline. " +
+      "Off unless the pi-delegate config has intercom.modules and intercom.agent_dir.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "send"] },
+        to: { type: "string", description: "send: target session name, full id, or id prefix" },
+        text: { type: "string", description: "send: plain-text message" },
+        replyTo: { type: "string", description: "send: answer a pending `ask` by its message id; omit otherwise" },
+        expect_reply_s: { type: "integer", minimum: 0, description: "send: seconds to wait for any message from the target before a notice (default 60; 0 = no notice)" },
+      },
+      required: ["action"],
+    },
+  },
 ];
 
 export function createToolHandlers({
@@ -229,6 +250,7 @@ export function createToolHandlers({
   config = loadConfig(),
   piDefaults = loadPiDefaults(),
   notifier = null,
+  intercom = null,
 } = {}) {
   // Every line here reaches the session as a notification, so it is written to be read by
   // a person rather than parsed. It names the project as well as the session_id: if this
@@ -548,6 +570,17 @@ export function createToolHandlers({
       });
     },
 
+    async pi_intercom({ action, to, text: body, replyTo, expect_reply_s } = {}) {
+      if (!intercom?.enabled) {
+        return text("pi_intercom is not configured: set intercom.modules and intercom.agent_dir in the pi-delegate config.", true);
+      }
+      let result;
+      if (action === "list") result = await intercom.list();
+      else if (action === "send") result = await intercom.send({ to, text: body, replyTo, expect_reply_s });
+      else return text(`Unknown pi_intercom action: ${action}. Use list or send.`, true);
+      return text(JSON.stringify(result, null, 2), result.ok === false);
+    },
+
     async pi_stats({ session_id }) {
       return withSession(session_id, (entry) =>
         text(JSON.stringify(entry.verdict ? { tokens: entry.verdict.tokens, duration_s: entry.verdict.duration_s } : { running: true }, null, 2)),
@@ -579,7 +612,12 @@ export async function main() {
   // can open reporting dispatches that died with the last process.
   writeStatus([]);
 
-  const handlers = createToolHandlers({ notifier, registry });
+  // The pi-intercom peer. Same standing as the notifier: it reports its own failures as
+  // notifications and never stops the server from starting.
+  const intercom = createIntercom({ config: loadConfig(), notifier });
+  await intercom.start().catch((error) => recordFatal("intercom", error));
+
+  const handlers = createToolHandlers({ notifier, registry, intercom });
   const version = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;
 
   try {
@@ -595,6 +633,7 @@ export async function main() {
   } finally {
     // Release the socket on the way out so the next server (a /reload-plugins restart is
     // the common case) finds the address free rather than having to reclaim it.
+    await intercom.close().catch(() => {});
     await notifier.close().catch(() => {});
     // And take the status file with it, so nothing lingers claiming a pi is running.
     clearStatus();
