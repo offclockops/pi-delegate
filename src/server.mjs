@@ -615,7 +615,9 @@ export async function main() {
   // The pi-intercom peer. Same standing as the notifier: it reports its own failures as
   // notifications and never stops the server from starting.
   const intercom = createIntercom({ config: loadConfig(), notifier });
-  await intercom.start().catch((error) => recordFatal("intercom", error));
+  // Not awaited: a slow tsx load or a hung broker must not delay the MCP handshake.
+  // send and list report "not connected" until the peer is up.
+  void intercom.start().catch((error) => recordFatal("intercom", error));
 
   const handlers = createToolHandlers({ notifier, registry, intercom });
   const version = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8")).version;

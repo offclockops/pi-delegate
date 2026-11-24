@@ -130,7 +130,7 @@ function intercomSettings(value) {
   const modules = nonEmptyString(value.modules);
   const agentDir = nonEmptyString(value.agent_dir);
   if (!modules || !agentDir) return null;
-  const ack = Number(value.ack_timeout_s);
+  const ack = value.ack_timeout_s === null || value.ack_timeout_s === undefined ? NaN : Number(value.ack_timeout_s);
   return {
     modules,
     agent_dir: agentDir,
@@ -170,6 +170,9 @@ export function loadConfig(file = configPath()) {
 // current (or default) value. Returns what was written so callers need not re-read.
 export function saveConfig(patch, file = configPath()) {
   const merged = { ...loadConfig(file), ...patch };
+  // A hand-written intercom block that does not validate stays as written, so a setup or
+  // mode change never erases the user's paths; only a patch that names it replaces it.
+  const rawIntercom = "intercom" in (patch ?? {}) ? patch.intercom : loadJsonObject(file).intercom;
   const normalized = {
     provider: nonEmptyString(merged.provider),
     model: nonEmptyString(merged.model),
@@ -187,7 +190,7 @@ export function saveConfig(patch, file = configPath()) {
     no_extensions: typeof merged.no_extensions === "boolean" ? merged.no_extensions : DEFAULTS.no_extensions,
     extensions: stringList(merged.extensions, DEFAULTS.extensions),
     env_passthrough: stringList(merged.env_passthrough, DEFAULTS.env_passthrough),
-    intercom: intercomSettings(merged.intercom),
+    ...(rawIntercom === undefined ? {} : { intercom: intercomSettings(rawIntercom) ?? rawIntercom }),
   };
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(normalized, null, 2)}\n`);

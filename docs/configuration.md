@@ -80,7 +80,7 @@ set and the pi agent directory:
 |---|---|---|
 | `modules` | — | A `node_modules` that holds `pi-intercom` and `tsx`. The plugin loads pi-intercom's own client from it, so it speaks the same protocol as the installed release. |
 | `agent_dir` | — | The pi agent directory (`PI_CODING_AGENT_DIR`); it picks the broker. |
-| `name` | `claude-` + 8 characters of the session id | The name this session registers under. Put it in each handoff. |
+| `name` | `claude-` + 8 characters of a per-session key | The name this session registers under; the default survives `/reload-plugins`. Put it in each handoff. |
 | `ack_timeout_s` | `60` | After a `send`, a notification arrives if the target sends nothing back in this time. A send can override it with `expect_reply_s`; `0` turns it off. |
 
 The MCP server holds the connection for the whole Claude session and reconnects if the broker goes

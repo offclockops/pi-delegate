@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { sessionKeyFrom } from "./events-log.mjs";
 
 // Claude as a peer on pi-intercom's local broker, for one coordinator session that drives
 // several independent pi windows.
@@ -18,19 +19,27 @@ const RETRY_FIRST_MS = 2_000;
 const RETRY_MAX_MS = 30_000;
 const DEFAULT_ACK_TIMEOUT_S = 60;
 
+// The default name must survive /reload-plugins: pi windows keep sending to it. The MCP
+// server gets a fresh CLAUDE_CODE_SESSION_ID on every reload (src/events-log.mjs), so the
+// name comes from the same reload-stable session key the notifier uses.
 export function intercomName(settings = {}, env = process.env) {
   if (settings.name) return settings.name;
-  const session = String(env.CLAUDE_CODE_SESSION_ID ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 8);
-  return session ? `claude-${session}` : "claude-coordinator";
+  const key = String(sessionKeyFrom(env) ?? "").replace(/^cc/, "").replace(/[^A-Za-z0-9]/g, "").slice(0, 8);
+  return key ? `claude-${key}` : "claude-coordinator";
 }
 
 // The default factory: pi-intercom ships TypeScript, so register tsx's ESM loader from the
 // same node_modules first. `PI_CODING_AGENT_DIR` picks the broker the pi windows use
 // (pi-intercom/broker/paths.ts reads it).
+let tsxRegistered = false;
+
 export async function loadIntercomClient(settings) {
   process.env.PI_CODING_AGENT_DIR = settings.agent_dir;
-  const tsx = await import(pathToFileURL(join(settings.modules, "tsx/dist/esm/api/index.mjs")).href);
-  tsx.register();
+  if (!tsxRegistered) {
+    const tsx = await import(pathToFileURL(join(settings.modules, "tsx/dist/esm/api/index.mjs")).href);
+    tsx.register();
+    tsxRegistered = true;
+  }
   const { IntercomClient } = await import(pathToFileURL(join(settings.modules, "pi-intercom/broker/client.ts")).href);
   return new IntercomClient();
 }
@@ -61,17 +70,23 @@ export function createIntercom({
   // One pending deadline per send: { to, messageId, seconds, timer }.
   const deadlines = new Set();
 
-  function matchesTarget(target, from) {
-    return target === from?.name || target === from?.id || (target.length >= 4 && String(from?.id ?? "").startsWith(target));
+  // The broker's own target rules (pi-intercom broker.ts): a name matches without regard to
+  // case, an id matches in full or by prefix.
+  function matchesTarget(target, session) {
+    const t = String(target ?? "").toLowerCase();
+    if (!t) return false;
+    return t === String(session?.name ?? "").toLowerCase() || String(session?.id ?? "").toLowerCase().startsWith(t);
   }
 
   function onMessage(from, message) {
     for (const d of [...deadlines]) {
-      if (matchesTarget(d.to, from)) { clearTimer(d.timer); deadlines.delete(d); }
+      const hit = d.targetId ? d.targetId === from?.id : matchesTarget(d.to, from);
+      if (hit) { clearTimer(d.timer); deadlines.delete(d); }
     }
     const sender = from?.name || short(from?.id) || "unknown";
     const reply = message?.replyTo ? ` replyTo=${message.replyTo}` : "";
-    announce(`intercom from ${sender} (${short(from?.id)}) msg=${message?.id}${reply}:\n${message?.content?.text ?? ""}`);
+    const ask = message?.expectsReply ? " ask (answer with replyTo)" : "";
+    announce(`intercom from ${sender} (${short(from?.id)}) msg=${message?.id}${reply}${ask}:\n${message?.content?.text ?? ""}`);
   }
 
   function scheduleRetry() {
@@ -86,22 +101,29 @@ export function createIntercom({
     connected = false;
     if (!lostAnnounced) {
       lostAnnounced = true;
-      announce(`intercom: lost the broker (${error?.message ?? "disconnected"}); reconnecting. Messages sent meanwhile wait in its mailbox.`);
+      announce(`intercom: lost the broker (${error?.message ?? "disconnected"}); reconnecting. A broker restart loses its mailbox, so peers may need to resend.`);
     }
     scheduleRetry();
   }
+
+  let lastSessionId;
 
   async function connect() {
     if (closed) return;
     try {
       if (!client) {
-        client = await clientFactory(settings);
+        const made = await clientFactory(settings);
+        if (closed) return;
+        client = made;
         client.on("message", onMessage);
         client.on("disconnected", onDisconnected);
         client.on("error", () => {});
       }
       const now = Date.now();
-      await client.connect({ cwd: process.cwd(), model: "claude-code", pid: process.pid, startedAt: now, lastActivity: now, name, status: "idle" });
+      // Reuse the earlier broker id, so peers that address this session by id keep working.
+      await client.connect({ cwd: process.cwd(), model: "claude-code", pid: process.pid, startedAt: now, lastActivity: now, name, status: "idle" }, lastSessionId);
+      if (closed) { await client.disconnect().catch(() => {}); return; }
+      lastSessionId = client.sessionId ?? lastSessionId;
       connected = true;
       retryMs = RETRY_FIRST_MS;
       if (lostAnnounced) {
@@ -161,7 +183,13 @@ export function createIntercom({
       };
       const seconds = Number.isInteger(expect_reply_s) && expect_reply_s >= 0 ? expect_reply_s : defaultAckS;
       if (out.ok && seconds > 0) {
-        const d = { to, messageId: out.messageId, seconds, timer: null };
+        // Pin the deadline to the one session the broker would pick, when the roster says.
+        let targetId = null;
+        try {
+          const hits = (await client.listSessions()).filter((x) => matchesTarget(to, x));
+          if (hits.length === 1) targetId = hits[0].id;
+        } catch { /* fall back to matching by the target text */ }
+        const d = { to, targetId, messageId: out.messageId, seconds, timer: null };
         d.timer = setTimer(async () => {
           if (!deadlines.delete(d)) return;
           announce(`intercom: no message from ${to} within ${seconds} s after msg=${d.messageId}; its status: ${await peerStatus(to)}.`);
