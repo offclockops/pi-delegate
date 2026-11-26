@@ -210,6 +210,14 @@ test("a failed send arms no deadline and returns the reason", async () => {
   assert.equal(timers.count(), 0);
 });
 
+test("list marks a pi-subagents child by its subagent- id", async () => {
+  const { intercom, client } = setup();
+  await intercom.start();
+  client.sessions = [{ id: "subagent-worker-run1-1", name: "review the diff", model: "m", status: "idle", cwd: "/w", lastActivity: Date.now() }];
+  const result = await intercom.list();
+  assert.equal(result.sessions[0].child, true);
+});
+
 test("list returns full ids, model, idle time, context, the unnamed flag and the pool", async () => {
   delete process.env.PI_INTERCOM_SCOPE_ID;
   const { intercom, client } = setup();
@@ -223,8 +231,8 @@ test("list returns full ids, model, idle time, context, the unnamed flag and the
   assert.equal(result.self, "claude-test");
   assert.equal(result.pool, "default");
   assert.equal(result.sessions.length, 2);
-  assert.deepEqual(result.sessions[0], { id: peer.id, name: "pi-1", model: "m-1", status: "thinking", cwd: "/w", idle_s: 12, contextPct: 41, unnamed: false });
-  assert.deepEqual(result.sessions[1], { id: "ffff0000-1111", name: "subagent-chat-ab", model: null, status: "idle", cwd: null, idle_s: null, contextPct: null, unnamed: true });
+  assert.deepEqual(result.sessions[0], { id: peer.id, name: "pi-1", model: "m-1", status: "thinking", cwd: "/w", idle_s: 12, contextPct: 41, unnamed: false, child: false });
+  assert.deepEqual(result.sessions[1], { id: "ffff0000-1111", name: "subagent-chat-ab", model: null, status: "idle", cwd: null, idle_s: null, contextPct: null, unnamed: true, child: false });
 });
 
 test("pool without a name generates one, reconnects under it and returns the join line", async () => {

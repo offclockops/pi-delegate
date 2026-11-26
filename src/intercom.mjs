@@ -180,6 +180,8 @@ export function createIntercom({
       idle_s: Number.isFinite(s.lastActivity) ? Math.max(0, Math.floor((Date.now() - s.lastActivity) / 1000)) : null,
       contextPct: Number.isFinite(s.contextPct) ? s.contextPct : null,
       unnamed: s.runtimeFallbackAlias === true,
+      // pi-subagents registers a delegated child under a `subagent-` id (pi-intercom ui/handover-picker.ts).
+      child: String(s.id ?? "").startsWith("subagent-"),
     }));
 
   async function list() {

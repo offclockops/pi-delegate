@@ -55,8 +55,8 @@ installed one for that session, so you can test changes without uninstalling.
 
 ### The core variant: tools and monitor only
 
-`pi-delegate-core` is a second plugin in this repository's marketplace. It ships the MCP tools and
-the completion monitor, and none of the skills or hooks. Use it when another setup already supplies
+`pi-delegate-core` is a second plugin in this repository's marketplace. It ships the MCP tools,
+the completion monitor, and the user-only `/pi-pool` command, and none of the other skills or the hooks. Use it when another setup already supplies
 the instructions and the discipline, and you want only the dispatch tools. Add the marketplace from
 the repository that carries the variant, then install it instead of the full plugin:
 
@@ -126,7 +126,7 @@ counts as existing product code, where the per-project state lives, and where th
 | `pi_result` | Collect the verdict of an async dispatch; `full=true` returns the whole final message |
 | `pi_transcript` | Drill in only when the verdict isn't enough |
 | `pi_stats` | Check token usage |
-| `pi_intercom` | Coordinate independent pi windows over pi-intercom: `list` the roster (full id, model, status, cwd, `idle_s`, `contextPct`, `unnamed`, and the current `pool`), `send` a message, `pool` to join a routing pool (`name` optional; generated when omitted; `default` leaves it; the result carries the `/intercom-pool <pool>` line for pi windows). Inbound messages arrive as notifications. Off until configured ([docs/configuration.md](docs/configuration.md#coordinating-independent-pi-sessions)) |
+| `pi_intercom` | Coordinate independent pi windows over pi-intercom: `list` the roster (full id, model, status, cwd, `idle_s`, `contextPct`, `unnamed`, `child` for a pi-subagents child, and the current `pool`), `send` a message, `pool` to join a routing pool (`name` optional; generated when omitted; `default` leaves it; the result carries the `/intercom-pool <pool>` line for pi windows). Inbound messages arrive as notifications. Off until configured ([docs/configuration.md](docs/configuration.md#coordinating-independent-pi-sessions)) |
 
 ## Consulting pi instead of delegating to it
 
