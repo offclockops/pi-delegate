@@ -1,7 +1,7 @@
 {
   "name": "pi-delegate-core",
-  "version": "0.15.0",
-  "description": "The pi-delegate MCP server and completion monitor only: no skills and no hooks",
+  "version": "0.16.0",
+  "description": "The pi-delegate MCP server, completion monitor, and the /pi-pool command: no discipline skills and no hooks",
   "license": "MIT",
   "author": {
     "name": "stanley"

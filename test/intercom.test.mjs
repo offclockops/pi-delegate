@@ -1,7 +1,8 @@
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createIntercom, intercomName } from "../src/intercom.mjs";
+import { buildChildEnv } from "../src/child-env.mjs";
 import { loadConfig, saveConfig } from "../src/config.mjs";
 import { readFileSync } from "node:fs";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -18,8 +19,10 @@ class FakeClient extends EventEmitter {
     this.sent = [];
     this.disconnects = 0;
     this.sessions = [];
+    this.scopes = [];
   }
   async connect(registration, sessionId) {
+    this.scopes.push(process.env.PI_INTERCOM_SCOPE_ID);
     this.connects.push(registration);
     this.connectIds = [...(this.connectIds ?? []), sessionId];
     if (this.failConnects > 0) {
@@ -52,6 +55,13 @@ function fakeTimers() {
     },
   };
 }
+
+// pool actions change process.env; put it back after every case.
+const savedScope = process.env.PI_INTERCOM_SCOPE_ID;
+afterEach(() => {
+  if (savedScope === undefined) delete process.env.PI_INTERCOM_SCOPE_ID;
+  else process.env.PI_INTERCOM_SCOPE_ID = savedScope;
+});
 
 const CONFIG = { intercom: { modules: "/x/node_modules", agent_dir: "/x/agent", name: "claude-test", ack_timeout_s: 60 } };
 
@@ -200,13 +210,100 @@ test("a failed send arms no deadline and returns the reason", async () => {
   assert.equal(timers.count(), 0);
 });
 
-test("list returns this session's name and the roster", async () => {
+test("list marks a pi-subagents child by its subagent- id", async () => {
   const { intercom, client } = setup();
   await intercom.start();
-  client.sessions = [{ ...peer, status: "thinking", cwd: "/w" }];
+  client.sessions = [{ id: "subagent-worker-run1-1", name: "review the diff", model: "m", status: "idle", cwd: "/w", lastActivity: Date.now() }];
+  const result = await intercom.list();
+  assert.equal(result.sessions[0].child, true);
+});
+
+test("list returns full ids, model, idle time, context, the unnamed flag and the pool", async () => {
+  delete process.env.PI_INTERCOM_SCOPE_ID;
+  const { intercom, client } = setup();
+  await intercom.start();
+  client.sessions = [
+    { ...peer, status: "thinking", cwd: "/w", model: "m-1", lastActivity: Date.now() - 12_500, contextPct: 41 },
+    { id: "ffff0000-1111", name: "subagent-chat-ab", runtimeFallbackAlias: true, status: "idle" },
+    { id: "own", name: "claude-test" },
+  ];
   const result = await intercom.list();
   assert.equal(result.self, "claude-test");
-  assert.deepEqual(result.sessions, [{ name: "pi-1", id: "01a20ddf", status: "thinking", cwd: "/w" }]);
+  assert.equal(result.pool, "default");
+  assert.equal(result.sessions.length, 2);
+  assert.deepEqual(result.sessions[0], { id: peer.id, name: "pi-1", model: "m-1", status: "thinking", cwd: "/w", idle_s: 12, contextPct: 41, unnamed: false, child: false });
+  assert.deepEqual(result.sessions[1], { id: "ffff0000-1111", name: "subagent-chat-ab", model: null, status: "idle", cwd: null, idle_s: null, contextPct: null, unnamed: true, child: false });
+});
+
+test("pool without a name generates one, reconnects under it and returns the join line", async () => {
+  delete process.env.PI_INTERCOM_SCOPE_ID;
+  const { intercom, client } = setup();
+  await intercom.start();
+  client.sessions = [{ ...peer, status: "idle" }];
+  const result = await intercom.pool({});
+  assert.equal(result.ok, true);
+  assert.match(result.pool, /^pool-[0-9a-z]{4}$/);
+  assert.equal(result.join, `/intercom-pool ${result.pool}`);
+  assert.equal(result.self, "claude-test");
+  assert.equal(result.sessions.length, 1);
+  assert.equal(client.disconnects, 1);
+  assert.deepEqual(client.scopes, [undefined, result.pool]);
+  assert.deepEqual(client.connectIds, [undefined, "own-session-1"]);
+});
+
+test("pool with a name joins it, and `default` leaves it", async () => {
+  delete process.env.PI_INTERCOM_SCOPE_ID;
+  const { intercom, client } = setup();
+  await intercom.start();
+  const joined = await intercom.pool({ name: "  team.a_1-x " });
+  assert.equal(joined.ok, true);
+  assert.equal(joined.pool, "team.a_1-x");
+  assert.equal(client.scopes.at(-1), "team.a_1-x");
+  const left = await intercom.pool({ name: "default" });
+  assert.equal(left.ok, true);
+  assert.equal(left.pool, "default");
+  assert.equal(left.join, "/intercom-pool default");
+  assert.equal(client.scopes.at(-1), undefined);
+  assert.equal("PI_INTERCOM_SCOPE_ID" in process.env, false);
+  assert.equal(client.disconnects, 2);
+});
+
+test("an invalid pool name is refused and touches neither the environment nor the connection", async () => {
+  process.env.PI_INTERCOM_SCOPE_ID = "keep";
+  const { intercom, client } = setup();
+  await intercom.start();
+  for (const bad of ["a b", "x/y", "a".repeat(65), "é"]) {
+    const result = await intercom.pool({ name: bad });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /pool name/);
+  }
+  assert.equal(process.env.PI_INTERCOM_SCOPE_ID, "keep");
+  assert.equal(client.connects.length, 1);
+  assert.equal(client.disconnects, 0);
+});
+
+test("pool reports a failed reconnect and the retry loop continues", async () => {
+  const { intercom, client, timers } = setup();
+  await intercom.start();
+  client.failConnects = 1;
+  const result = await intercom.pool({ name: "p1" });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /broker unavailable/);
+  assert.equal(timers.count(), 1);
+});
+
+test("pool is off without an intercom config", async () => {
+  const { intercom } = setup({ config: {} });
+  const result = await intercom.pool({ name: "p1" });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /not configured/);
+  assert.notEqual(process.env.PI_INTERCOM_SCOPE_ID, "p1");
+});
+
+test("the pool variable does not reach pi_dispatch children", () => {
+  const env = buildChildEnv({ PI_INTERCOM_SCOPE_ID: "pool-x", PATH: "/bin" });
+  assert.equal("PI_INTERCOM_SCOPE_ID" in env, false);
+  assert.equal(env.PATH, "/bin");
 });
 
 test("a lost broker is announced once and the client reconnects with backoff", async () => {
@@ -296,4 +393,124 @@ test("saveConfig keeps a hand-written intercom block, even one that does not val
   writeFileSync(file, JSON.stringify({}));
   saveConfig({ thinking: "low" }, file);
   assert.equal("intercom" in JSON.parse(readFileSync(file, "utf8")), false);
+});
+
+// A client that behaves like pi-intercom's IntercomClient where races show: connect waits for
+// the test to let registration finish, a second connect on a live socket is refused, and a
+// disconnect fails a connect that has not registered yet.
+class StrictClient extends FakeClient {
+  constructor() { super(); this.socket = false; this.pending = []; }
+  connect(registration, sessionId) {
+    if (this.socket) return Promise.reject(new Error("Already connected"));
+    this.socket = true;
+    this.connects.push(registration);
+    this.scopes.push(process.env.PI_INTERCOM_SCOPE_ID);
+    return new Promise((resolve, reject) => {
+      this.pending.push({ resolve: () => { this.sessionId = sessionId ?? "own-session-1"; resolve(); }, reject });
+    });
+  }
+  register() { for (const p of this.pending.splice(0)) p.resolve(); }
+  async disconnect() {
+    this.disconnects += 1;
+    this.socket = false;
+    for (const p of this.pending.splice(0)) p.reject(new Error("Connection closed before registration"));
+  }
+}
+
+// Lets queued promise callbacks run; the strict client registers whatever is waiting each turn.
+async function settle(client, rounds = 20) {
+  for (let i = 0; i < rounds; i += 1) { client.register?.(); await new Promise((r) => setImmediate(r)); }
+}
+
+test("pool during a start that is still loading the client makes one client in the new pool", async () => {
+  const client = new StrictClient();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let made = 0;
+  const lines = [];
+  const timers = fakeTimers();
+  const intercom = createIntercom({
+    config: CONFIG, notifier: { broadcast: (l) => lines.push(l) },
+    clientFactory: async () => { made += 1; await gate; return client; },
+    setTimer: timers.set, clearTimer: timers.clear, log: () => {},
+  });
+  void intercom.start();
+  const joined = intercom.pool({ name: "pool-abc" });
+  release();
+  await settle(client);
+  const result = await joined;
+  assert.equal(made, 1);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(client.scopes.at(-1), "pool-abc");
+  assert.equal(timers.count(), 0);
+  assert.deepEqual(lines, []);
+});
+
+test("two pool calls at once run one after the other and leave no retry behind", async () => {
+  const client = new StrictClient();
+  const { intercom, lines, timers } = setup({ client });
+  const started = intercom.start();
+  await settle(client);
+  await started;
+  const first = intercom.pool({ name: "pool-a" });
+  const second = intercom.pool({ name: "pool-b" });
+  await settle(client);
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(a.pool, "pool-a");
+  assert.equal(b.ok, true, JSON.stringify(b));
+  assert.equal(b.pool, "pool-b");
+  assert.deepEqual(client.scopes, [undefined, "pool-a", "pool-b"]);
+  assert.equal(timers.count(), 0);
+  assert.deepEqual(lines, []);
+});
+
+test("pool waits for a retry that is still connecting, and no stale retry is left", async () => {
+  const client = new StrictClient();
+  const { intercom, lines, timers } = setup({ client });
+  const started = intercom.start();
+  await settle(client);
+  await started;
+  // The broker goes away; the retry timer fires and its connect waits for registration.
+  client.socket = false;
+  client.emit("disconnected", new Error("broker restarted"));
+  const retrying = timers.fire(2_000);
+  const joined = intercom.pool({ name: "pool-abc" });
+  await settle(client);
+  await retrying;
+  const result = await joined;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(client.scopes.at(-1), "pool-abc");
+  assert.equal(timers.count(), 0);
+  const listed = await intercom.list();
+  assert.equal(listed.ok, true);
+  assert.ok(!lines.some((l) => /Already connected/.test(l)), lines.join("\n"));
+});
+
+test("pool drops reply deadlines from the old pool and says how many", async () => {
+  const { intercom, lines, timers } = setup();
+  await intercom.start();
+  await intercom.send({ to: "pi-1", text: "hi" });
+  assert.equal(timers.count(), 1);
+  const result = await intercom.pool({ name: "pool-abc" });
+  assert.equal(result.ok, true);
+  assert.equal(result.dropped_reply_deadlines, 1);
+  assert.match(result.note, /old pool/);
+  assert.equal(timers.count(), 0);
+  await timers.fire(60_000);
+  assert.ok(!lines.some((l) => /no message from/.test(l)));
+});
+
+test("close during a pool switch announces no retry", async () => {
+  const client = new StrictClient();
+  const { intercom, lines, timers } = setup({ client });
+  const started = intercom.start();
+  await settle(client);
+  await started;
+  const joined = intercom.pool({ name: "pool-abc" });
+  await new Promise((r) => setImmediate(r));
+  await intercom.close();
+  await joined;
+  assert.ok(!lines.some((l) => /retrying/.test(l)), lines.join("\n"));
+  assert.equal(timers.count(), 0);
 });

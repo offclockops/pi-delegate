@@ -1,5 +1,6 @@
 // The core variant (variants/core) is a second plugin in this marketplace: the MCP server
-// and the completion monitor, without the skills and the hooks. It shares its code with the
+// and the completion monitor, plus the user-only /pi-pool command, without the discipline skills
+// and the hooks. It shares its code with the
 // full plugin through relative symlinks, so these tests guard the three things that can
 // drift: the component set, the version, and the paths the manifests point at.
 import { test } from "node:test";
@@ -19,8 +20,16 @@ test("the core variant holds the MCP server and the monitor, and nothing else", 
   // package.json is here for its "type": "module". An installed copy of the variant has no
   // parent package, and without that field the extensionless scripts in bin/ would depend
   // on Node guessing their module format.
-  assert.deepEqual(readdirSync(VARIANT).sort(), [".claude-plugin", ".mcp.json", "bin", "monitors", "package.json", "src"]);
+  assert.deepEqual(readdirSync(VARIANT).sort(), [".claude-plugin", ".mcp.json", "bin", "monitors", "package.json", "skills", "src"]);
   assert.deepEqual(readdirSync(join(VARIANT, ".claude-plugin")), ["plugin.json"]);
+});
+
+test("the core variant's one skill is the user-only /pi-pool command, linked from the full plugin", () => {
+  assert.deepEqual(readdirSync(join(VARIANT, "skills")), ["pi-pool"]);
+  const link = join(VARIANT, "skills", "pi-pool");
+  assert.ok(lstatSync(link).isSymbolicLink());
+  assert.equal(readlinkSync(link), "../../../skills/pi-pool");
+  assert.match(readFileSync(join(link, "SKILL.md"), "utf8"), /^disable-model-invocation: true$/m);
 });
 
 test("the core variant shares its code through relative links that stay inside the repository", () => {
