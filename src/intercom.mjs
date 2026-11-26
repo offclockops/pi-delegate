@@ -46,6 +46,12 @@ export async function loadIntercomClient(settings) {
 
 const short = (id) => String(id ?? "").slice(0, 8);
 
+// pi-intercom reads its pool (routing scope) from this variable when a client connects.
+const POOL_VAR = "PI_INTERCOM_SCOPE_ID";
+const POOL_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+const currentPool = () => (process.env[POOL_VAR] ?? "").trim() || "default";
+const generatedPool = () => `pool-${Array.from({ length: 4 }, () => Math.floor(Math.random() * 36).toString(36)).join("")}`;
+
 export function createIntercom({
   config,
   notifier,
@@ -108,6 +114,7 @@ export function createIntercom({
 
   let lastSessionId;
 
+  // Resolves to the error when the attempt failed (a retry is then scheduled), else undefined.
   async function connect() {
     if (closed) return;
     try {
@@ -139,6 +146,7 @@ export function createIntercom({
         announce(line);
       }
       scheduleRetry();
+      return error;
     }
   }
 
@@ -151,6 +159,19 @@ export function createIntercom({
       return "unknown (roster unavailable)";
     }
   }
+
+  const roster = (sessions) => sessions
+    .filter((s) => s.name !== name)
+    .map((s) => ({
+      id: String(s.id ?? ""),
+      name: s.name ?? null,
+      model: s.model ?? null,
+      status: s.status ?? null,
+      cwd: s.cwd ?? null,
+      idle_s: Number.isFinite(s.lastActivity) ? Math.max(0, Math.floor((Date.now() - s.lastActivity) / 1000)) : null,
+      contextPct: Number.isFinite(s.contextPct) ? s.contextPct : null,
+      unnamed: s.runtimeFallbackAlias === true,
+    }));
 
   const notConfigured = { ok: false, error: "pi_intercom is not configured: set intercom.modules and intercom.agent_dir in the pi-delegate config." };
   const notConnected = () => ({ ok: false, error: `not connected to the intercom broker as ${name}; it is reconnecting.` });
@@ -204,17 +225,31 @@ export function createIntercom({
       if (!enabled) return notConfigured;
       if (!connected) return notConnected();
       try {
-        const sessions = await client.listSessions();
-        return {
-          ok: true,
-          self: name,
-          sessions: sessions
-            .filter((s) => s.name !== name)
-            .map((s) => ({ name: s.name ?? null, id: short(s.id), status: s.status ?? null, cwd: s.cwd ?? null })),
-        };
+        return { ok: true, self: name, pool: currentPool(), sessions: roster(await client.listSessions()) };
       } catch (error) {
         return { ok: false, error: error?.message ?? String(error) };
       }
+    },
+
+    // Join a pool: pi-intercom reads the scope at connect time, so switch the variable,
+    // drop the connection and connect again under the same broker id.
+    async pool({ name: requested } = {}) {
+      if (!enabled) return notConfigured;
+      const wanted = String(requested ?? "").trim() || generatedPool();
+      if (wanted !== "default" && !POOL_NAME.test(wanted)) {
+        return { ok: false, error: "pool name must be 1-64 characters from A-Z a-z 0-9 . _ - (or `default` to leave the pool)." };
+      }
+      if (wanted === "default") delete process.env[POOL_VAR];
+      else process.env[POOL_VAR] = wanted;
+      if (retryTimer) { clearTimer(retryTimer); retryTimer = null; }
+      connected = false;
+      if (client) await client.disconnect().catch(() => {});
+      const failure = await connect();
+      if (failure) return { ok: false, error: `could not join pool ${wanted}: ${failure?.message ?? failure}; retrying.` };
+      if (!connected) return notConnected();
+      const out = await this.list();
+      if (!out.ok) return out;
+      return { ...out, join: `/intercom-pool ${out.pool}` };
     },
 
     async close() {

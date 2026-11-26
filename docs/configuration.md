@@ -88,6 +88,13 @@ away. Every inbound message reaches the session through the same notification ch
 dispatch, so it needs the monitor, which runs in interactive sessions only. Whether an idle pi window
 wakes on a message is pi-intercom's `inboundTrigger` setting on the pi side.
 
+`pi_intercom` with `action: "pool"` moves this session into a pi-intercom pool (routing scope):
+the session then sees and messages only sessions in the same pool. Give `name`, or omit it for a
+generated `pool-xxxx`; `default` leaves the pool. The result carries the `/intercom-pool <pool>`
+line to run in each pi window. A session can also start in a pool: launch Claude with
+`PI_INTERCOM_SCOPE_ID=<pool>`. Dispatched pi children never inherit the pool, because their
+environment is an allowlist.
+
 ## Task as a file or as text
 
 `pi_dispatch` takes exactly one of `task_file` (the absolute path of a task book; pi is told to

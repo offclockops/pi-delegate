@@ -227,11 +227,13 @@ export const TOOL_DEFINITIONS = [
       "session name (put it in each handoff) and the roster with each session's status. `send` delivers " +
       "a message; an idle pi session wakes on it. Every inbound message arrives as a notification. " +
       "After a send, a notification also arrives if the target says nothing within the reply deadline. " +
+      "`pool` joins a routing pool (generated name when omitted) and returns the line for pi windows to run. " +
       "Off unless the pi-delegate config has intercom.modules and intercom.agent_dir.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["list", "send"] },
+        action: { type: "string", enum: ["list", "send", "pool"] },
+        name: { type: "string", description: "pool: pool to join; omit for a generated name; `default` leaves the pool" },
         to: { type: "string", description: "send: target session name, full id, or id prefix" },
         text: { type: "string", description: "send: plain-text message" },
         replyTo: { type: "string", description: "send: answer a pending `ask` by its message id; omit otherwise" },
@@ -570,14 +572,15 @@ export function createToolHandlers({
       });
     },
 
-    async pi_intercom({ action, to, text: body, replyTo, expect_reply_s } = {}) {
+    async pi_intercom({ action, to, text: body, replyTo, expect_reply_s, name } = {}) {
       if (!intercom?.enabled) {
         return text("pi_intercom is not configured: set intercom.modules and intercom.agent_dir in the pi-delegate config.", true);
       }
       let result;
       if (action === "list") result = await intercom.list();
       else if (action === "send") result = await intercom.send({ to, text: body, replyTo, expect_reply_s });
-      else return text(`Unknown pi_intercom action: ${action}. Use list or send.`, true);
+      else if (action === "pool") result = await intercom.pool({ name });
+      else return text(`Unknown pi_intercom action: ${action}. Use list, send or pool.`, true);
       return text(JSON.stringify(result, null, 2), result.ok === false);
     },
 

@@ -126,7 +126,7 @@ counts as existing product code, where the per-project state lives, and where th
 | `pi_result` | Collect the verdict of an async dispatch; `full=true` returns the whole final message |
 | `pi_transcript` | Drill in only when the verdict isn't enough |
 | `pi_stats` | Check token usage |
-| `pi_intercom` | Coordinate independent pi windows over pi-intercom: `list` the roster, `send` a message. Inbound messages arrive as notifications. Off until configured ([docs/configuration.md](docs/configuration.md#coordinating-independent-pi-sessions)) |
+| `pi_intercom` | Coordinate independent pi windows over pi-intercom: `list` the roster (full id, model, status, cwd, `idle_s`, `contextPct`, `unnamed`, and the current `pool`), `send` a message, `pool` to join a routing pool (`name` optional; generated when omitted; `default` leaves it; the result carries the `/intercom-pool <pool>` line for pi windows). Inbound messages arrive as notifications. Off until configured ([docs/configuration.md](docs/configuration.md#coordinating-independent-pi-sessions)) |
 
 ## Consulting pi instead of delegating to it
 
