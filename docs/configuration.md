@@ -91,7 +91,9 @@ wakes on a message is pi-intercom's `inboundTrigger` setting on the pi side.
 `pi_intercom` with `action: "pool"` moves this session into a pi-intercom pool (routing scope):
 the session then sees and messages only sessions in the same pool. Give `name`, or omit it for a
 generated `pool-xxxx`; `default` leaves the pool. The result carries the `/intercom-pool <pool>`
-line to run in each pi window. A session can also start in a pool: launch Claude with
+line to run in each pi window. Switches run one at a time and wait for a connect in flight. A
+switch drops pending reply deadlines and reports how many: a reply to a message sent before the
+switch goes to the old pool, where the broker holds it. A session can also start in a pool: launch Claude with
 `PI_INTERCOM_SCOPE_ID=<pool>`. Dispatched pi children never inherit the pool, because their
 environment is an allowlist.
 
